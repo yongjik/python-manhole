@@ -293,7 +293,9 @@ def handle_connection_repl(client):
 
     backup = []
     old_interval = getinterval()
-    patches = [('r', ('stdin', '__stdin__')), ('w', ('stdout', '__stdout__'))]
+    patches = [('r', ('stdin', '__stdin__'))]
+    if _MANHOLE.redirect_stdout:
+        patches.append(('w', ('stdout', '__stdout__')))
     if _MANHOLE.redirect_stderr:
         patches.append(('w', ('stderr', '__stderr__')))
     try:
@@ -301,6 +303,7 @@ def handle_connection_repl(client):
             for name in names:
                 backup.append((name, getattr(sys, name)))
                 setattr(sys, name, client.makefile(mode, 1 if PY3 else 0))
+        _MANHOLE.console = client.makefile('w', 1 if PY3 else 0)
         try:
             handle_repl(_MANHOLE.locals)
         except BrokenPipeError:
@@ -320,6 +323,7 @@ def handle_connection_repl(client):
                 except IOError:
                     pass
                 setattr(sys, name, fh)
+            _MANHOLE.console = None
             try:
                 client.close()
             except IOError:
@@ -338,13 +342,22 @@ _CONNECTION_HANDLER_ALIASES = {
 class ManholeConsole(code.InteractiveConsole):
     def __init__(self, *args, **kw):
         code.InteractiveConsole.__init__(self, *args, **kw)
-        if _MANHOLE.redirect_stderr:
-            self.file = sys.stderr
-        else:
-            self.file = sys.stdout
+        self.file = _MANHOLE.console
 
     def write(self, data):
         self.file.write(data)
+        self.file.flush()
+
+    def raw_input(self, prompt=""):
+        if _MANHOLE.redirect_stdout:
+            return input(prompt)
+        else:
+            self.write(prompt)
+            line = sys.stdin.readline()
+            if '\n' not in line:
+                raise EOFError
+            line.rstrip('\n')
+            return line
 
 
 def handle_repl(locals):
@@ -358,6 +371,7 @@ def handle_repl(locals):
         'os': os,
         'socket': socket,
         'traceback': traceback,
+        'console': _MANHOLE.console
     }
     if locals:
         namespace.update(locals)
@@ -420,7 +434,9 @@ class Manhole(object):
     locals = None
     original_os_fork = None
     original_os_forkpty = None
+    redirect_stdout = False
     redirect_stderr = True
+    console = None
     reinstall_delay = 0.5
     should_restart = None
     sigmask = _ALL_SIGNALS
@@ -433,9 +449,10 @@ class Manhole(object):
     def configure(self,
                   patch_fork=True, activate_on=None, sigmask=_ALL_SIGNALS, oneshot_on=None, thread=True,
                   start_timeout=0.5, socket_path=None, reinstall_delay=0.5, locals=None, daemon_connection=False,
-                  redirect_stderr=True, connection_handler=handle_connection_repl):
+                  redirect_stdout=False, redirect_stderr=True, connection_handler=handle_connection_repl):
         self.socket_path = socket_path
         self.reinstall_delay = reinstall_delay
+        self.redirect_stdout = redirect_stdout
         self.redirect_stderr = redirect_stderr
         self.locals = locals
         self.sigmask = sigmask
@@ -599,6 +616,7 @@ def install(verbose=True,
             alleviates cleanup failures when using fork+exec patterns.
         locals (dict): Names to add to manhole interactive shell locals.
         daemon_connection (bool): The connection thread is daemonic (dies on app exit). Default: ``False``.
+        redirect_stdout (bool): Redirect output from stdout to manhole console. Default: ``False``.
         redirect_stderr (bool): Redirect output from stderr to manhole console. Default: ``True``.
         connection_handler (function): Connection handler to use. Use ``"exec"`` for simple implementation without
             output redirection or your own function. (warning: this is for advanced users). Default: ``"repl"``.
@@ -635,5 +653,11 @@ def dump_stacktraces():
             if line:
                 lines.append("  %s" % (line.strip()))
     lines.append("#############################################\n\n")
+    if not _MANHOLE.redirect_stdout:
+        lines.append("\n***** Output is sent to the original stdout/stderr.\n"
+                     "***** Use print(..., file=console) to see result here.")
 
-    print('\n'.join(lines), file=sys.stderr if _MANHOLE.redirect_stderr else sys.stdout)
+    print('\n'.join(lines), file=_MANHOLE.console)
+    # Line buffering doesn't work for socket.makefile() yet:
+    # https://bugs.python.org/issue31062
+    _MANHOLE.console.flush()
