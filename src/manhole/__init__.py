@@ -434,7 +434,7 @@ class Manhole(object):
     locals = None
     original_os_fork = None
     original_os_forkpty = None
-    redirect_stdout = False
+    redirect_stdout = True
     redirect_stderr = True
     console = None
     reinstall_delay = 0.5
@@ -449,7 +449,7 @@ class Manhole(object):
     def configure(self,
                   patch_fork=True, activate_on=None, sigmask=_ALL_SIGNALS, oneshot_on=None, thread=True,
                   start_timeout=0.5, socket_path=None, reinstall_delay=0.5, locals=None, daemon_connection=False,
-                  redirect_stdout=False, redirect_stderr=True, connection_handler=handle_connection_repl):
+                  redirect_stdout=True, redirect_stderr=True, connection_handler=handle_connection_repl):
         self.socket_path = socket_path
         self.reinstall_delay = reinstall_delay
         self.redirect_stdout = redirect_stdout
@@ -616,7 +616,7 @@ def install(verbose=True,
             alleviates cleanup failures when using fork+exec patterns.
         locals (dict): Names to add to manhole interactive shell locals.
         daemon_connection (bool): The connection thread is daemonic (dies on app exit). Default: ``False``.
-        redirect_stdout (bool): Redirect output from stdout to manhole console. Default: ``False``.
+        redirect_stdout (bool): Redirect output from stdout to manhole console. Default: ``True``.
         redirect_stderr (bool): Redirect output from stderr to manhole console. Default: ``True``.
         connection_handler (function): Connection handler to use. Use ``"exec"`` for simple implementation without
             output redirection or your own function. (warning: this is for advanced users). Default: ``"repl"``.
